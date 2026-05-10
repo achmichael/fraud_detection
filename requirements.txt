@@ -1,0 +1,8 @@
+pandas
+numpy==1.26.4
+matplotlib
+seaborn
+scikit-learn
+xgboost
+imbalanced-learn
+shap==0.45.1
