@@ -485,6 +485,8 @@ sns.barplot(
 plt.title("Top 15 Feature Importance - XGBoost")
 plt.xlabel("Importance")
 plt.ylabel("Feature")
+plt.tight_layout()
+plt.savefig("feature_importance.png", dpi=300)
 plt.show()
 
 # %% [markdown]
