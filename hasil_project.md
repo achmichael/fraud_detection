@@ -1,161 +1,189 @@
-# Hasil Project Credit Card Fraud Detection - XGBoost
+# Dokumentasi & Hasil Running: Credit Card Fraud Detection dengan XGBoost
 
-## Ringkasan dataset
+Dokumen ini berisi hasil eksekusi (*running*) terbaru dari *notebook* `credit_card_fraud_xgboost_project.ipynb` beserta penjelasan detail untuk setiap tahapan (cell) yang dieksekusi. Dokumen ini sangat cocok digunakan sebagai panduan presentasi atau demo proyek.
 
-- File dataset: `data/creditcard.csv`
-- Ukuran dataset: 284.807 baris dan 31 kolom
-- Target: `Class`
-- `Class = 0`: transaksi normal
-- `Class = 1`: transaksi fraud
-- Missing value: 0
-- Duplikasi: 1.081 baris
+## 1. Load dan Pahami Dataset (Cell 1 - 9)
+**Penjelasan Cell:**
+Tahap awal mengimpor *library* yang dibutuhkan (Pandas, Scikit-Learn, XGBoost) dan memuat dataset `creditcard.csv`. Selanjutnya, dilakukan pengecekan ukuran data dan distribusi kelas target (`Class`).
 
-## Masalah imbalance
+**Hasil Output:**
+```text
+Ukuran dataset: (284807, 31)
+Jumlah transaksi normal: 284,315
+Jumlah transaksi fraud : 492
+Persentase normal      : 99.8273%
+Persentase fraud       : 0.1727%
+Rasio normal:fraud     : 577.88:1
+```
 
-Distribusi kelas:
+**Interpretasi untuk Demo:**
+Kasus *fraud* hanya sebagian sangat kecil dari dataset (kurang dari 0.2%). Ini disebut *Extreme Class Imbalance*. Model konvensional yang hanya menebak "Normal" akan mendapatkan akurasi 99.8%, namun gagal mendeteksi penipuan. Karenanya, metrik *Accuracy* tidak relevan di sini.
 
-| Class | Jumlah | Persentase |
-|---|---:|---:|
-| 0 - Normal | 284.315 | 99,8273% |
-| 1 - Fraud | 492 | 0,1727% |
+---
 
-Rasio normal terhadap fraud sekitar 577,88:1. Karena itu, accuracy tidak dipakai
-sebagai metrik utama. Fokus evaluasi adalah recall, precision, F1-score,
-ROC-AUC, dan PR-AUC.
+## 2. Exploratory Data Analysis / EDA (Cell 10 - 19)
+**Penjelasan Cell:**
+Melakukan pengecekan *missing value*, duplikasi, dan menganalisis statistik dari fitur `Amount` (nominal transaksi) dan `Time` (waktu transaksi). Selain itu, dihitung juga korelasi fitur terhadap target.
 
-## Alasan menggunakan XGBoost
+**Hasil Output:**
+```text
+Total missing value: 0
+Jumlah baris duplikat: 1081
 
-XGBoost dipilih karena cocok untuk data tabular numerik, mampu menangkap pola
-non-linear dari kombinasi fitur, dan menyediakan `scale_pos_weight` untuk
-membantu model belajar dari kelas fraud yang sangat sedikit.
+Statistik Amount per kelas:
+           mean         std  min   25%    50%     75%       max
+Class                                                          
+0      88.291022  250.105092  0.0  5.65  22.00   77.05  25691.16
+1     122.211321  256.683288  0.0  1.00   9.25  105.89   2125.87
 
-## Preprocessing
+Top 5 Korelasi Absolut Terhadap Target:
+V17: -0.326481
+V14: -0.302544
+V12: -0.260593
+V10: -0.216883
+V16: -0.196539
+```
 
-- Fitur `X`: semua kolom selain `Class`.
-- Target `y`: kolom `Class`.
-- `Time` dan `Amount` di-scale menggunakan `RobustScaler`.
-- `V1` sampai `V28` tidak di-scale ulang karena merupakan fitur hasil PCA.
-- Split data dilakukan secara stratified.
-- Test set 20% disimpan sebagai evaluasi akhir.
-- Dari training set, sebagian data dipakai sebagai validation set untuk
-  threshold tuning agar pemilihan threshold tidak memakai test set.
-- `scale_pos_weight` dihitung dari training data:
-  - Normal training: 170.588
-  - Fraud training: 295
-  - `scale_pos_weight`: 578,2644
+**Interpretasi untuk Demo:**
+Nilai median `Amount` pada transaksi *fraud* ternyata lebih kecil (9.25) dibandingkan transaksi normal (22.00). Ini membuktikan penipu sering melakukan transaksi nominal kecil agar tidak mencurigakan. Selain itu, korelasi fitur sangat rendah (maksimal ~0.3), menandakan perlunya model yang bisa menangkap interaksi *non-linear* seperti XGBoost.
 
-## Hasil evaluasi XGBoost
+---
 
-Pada test set dengan threshold default 0,5:
+## 3. Preprocessing & Splitting (Cell 20 - 22)
+**Penjelasan Cell:**
+Membagi data menjadi set *Train* (60%), *Validation* (20%), dan *Test* (20%) secara *Stratified* (mempertahankan rasio *fraud*). Fitur `Time` dan `Amount` disesuaikan skalanya dengan `RobustScaler` karena rentan terhadap nilai *outlier* (pencilan).
 
-| Metrik fraud | Nilai |
-|---|---:|
-| Precision | 0,6774 |
-| Recall | 0,8571 |
-| F1-score | 0,7568 |
-| ROC-AUC | 0,9759 |
-| PR-AUC | 0,8541 |
+**Hasil Output:**
+```text
+Ukuran train     : (170883, 30)
+Ukuran validation: (56962, 30)
+Ukuran test      : (56962, 30)
 
-Confusion matrix threshold 0,5:
+Distribusi kelas train:
+0    170588
+1       295
+```
 
-| | Pred normal | Pred fraud |
-|---|---:|---:|
-| Actual normal | 56.824 | 40 |
-| Actual fraud | 14 | 84 |
+**Interpretasi untuk Demo:**
+*Stratified split* sukses mempertahankan proporsi kelas fraud. Dari 170 ribu data training, model hanya akan belajar dari 295 contoh kasus *fraud*.
 
-## Threshold tuning
+---
 
-Threshold tuning dilakukan pada validation set. Ringkasan hasil:
+## 4. Handling Imbalanced Data (Cell 23 - 25)
+**Penjelasan Cell:**
+Menghitung `scale_pos_weight` untuk disuntikkan ke parameter algoritma XGBoost. Ini berfungsi agar model memberikan perhatian ekstra saat mempelajari kasus *fraud*.
 
-| Threshold | Precision fraud | Recall fraud | F1 fraud | TN | FP | FN | TP |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 0,1 | 0,2828 | 0,8485 | 0,4242 | 56.650 | 213 | 15 | 84 |
-| 0,2 | 0,4576 | 0,8182 | 0,5870 | 56.767 | 96 | 18 | 81 |
-| 0,3 | 0,6045 | 0,8182 | 0,6953 | 56.810 | 53 | 18 | 81 |
-| 0,4 | 0,6810 | 0,7980 | 0,7349 | 56.826 | 37 | 20 | 79 |
-| 0,5 | 0,7290 | 0,7879 | 0,7573 | 56.834 | 29 | 21 | 78 |
-| 0,6 | 0,7573 | 0,7879 | 0,7723 | 56.838 | 25 | 21 | 78 |
-| 0,7 | 0,8041 | 0,7879 | 0,7959 | 56.844 | 19 | 21 | 78 |
-| 0,8 | 0,8387 | 0,7879 | 0,8125 | 56.848 | 15 | 21 | 78 |
-| 0,9 | 0,8667 | 0,7879 | 0,8254 | 56.851 | 12 | 21 | 78 |
+**Hasil Output:**
+```text
+Normal pada training: 170,588
+Fraud pada training : 295
+scale_pos_weight    : 578.2644
+```
 
-Threshold 0,9 dipilih berdasarkan F2-score validation tertinggi. Pada validation
-set, threshold ini mempertahankan recall yang sama dengan beberapa threshold
-lebih rendah, tetapi mengurangi false positive.
+**Interpretasi untuk Demo:**
+Angka ini menginstruksikan XGBoost: *"Satu kesalahan prediksi pada kelas fraud setara dengan 578 kesalahan prediksi pada kelas normal!"* Hal ini mencegah model hanya condong ke mayoritas kelas normal.
 
-Pada test set dengan threshold 0,9:
+---
 
-| Metrik fraud | Nilai |
-|---|---:|
-| Precision | 0,8333 |
-| Recall | 0,8163 |
-| F1-score | 0,8247 |
-| ROC-AUC | 0,9759 |
-| PR-AUC | 0,8541 |
+## 5. Modeling Baseline XGBoost (Cell 28 - 30)
+**Penjelasan Cell:**
+Melatih model XGBoost dengan hyperparameter untuk mencegah *overfitting* (seperti `max_depth=4`, `learning_rate=0.05`). Setelah dilatih, model dievaluasi di *test set* dengan `threshold` bawaan 0.5.
 
-Confusion matrix threshold 0,9:
+**Hasil Output:**
+```text
+Model: XGBoost default threshold (0.5)
 
-| | Pred normal | Pred fraud |
-|---|---:|---:|
-| Actual normal | 56.848 | 16 |
-| Actual fraud | 18 | 80 |
+Confusion matrix:
+[[56826    38]
+ [   14    84]]
 
-Trade-off: threshold 0,5 menemukan fraud lebih banyak pada test set (recall
-0,8571) tetapi menghasilkan 40 false positive. Threshold 0,9 menghasilkan
-precision lebih tinggi dan false positive lebih sedikit, tetapi fraud yang lolos
-menjadi 18 kasus.
+Classification report:
+              precision    recall  f1-score   support
+           0     0.9998    0.9993    0.9995     56864
+           1     0.6885    0.8571    0.7636        98
 
-## Feature importance
+ROC-AUC : 0.9730
+PR-AUC  : 0.8481
+```
 
-Top 15 fitur paling penting dari XGBoost:
+**Interpretasi untuk Demo:**
+Dari 98 total penipuan (*fraud*) yang ada, XGBoost berhasil mendeteksi **84 kasus** (`Recall = 0.8571`) dan hanya kecolongan 14 kasus (`False Negative`). Namun, ia juga salah menuduh 38 transaksi normal sebagai penipuan (`False Positive`, memengaruhi `Precision`).
 
-| Fitur | Importance |
-|---|---:|
-| V14 | 0,3363 |
-| V10 | 0,1663 |
-| V4 | 0,0637 |
-| Amount | 0,0412 |
-| V8 | 0,0368 |
-| V20 | 0,0347 |
-| V12 | 0,0307 |
-| V13 | 0,0265 |
-| V11 | 0,0219 |
-| V19 | 0,0211 |
-| V17 | 0,0207 |
-| V21 | 0,0185 |
-| V3 | 0,0162 |
-| V26 | 0,0142 |
-| V5 | 0,0135 |
+---
 
-Fitur `V14` dan `V10` paling dominan pada model lokal. Karena fitur PCA
-dianonimkan, interpretasi bisnis langsung terbatas, tetapi fitur-fitur ini
-menunjukkan sinyal numerik yang paling sering dimanfaatkan model.
+## 6. Threshold Tuning (Cell 31 - 34)
+**Penjelasan Cell:**
+Untuk mencari keseimbangan terbaik antara *Recall* dan *Precision*, kita menguji berbagai batas probabilitas (*threshold*) menggunakan data *Validation*, lalu memilih yang memiliki **F2-Score** tertinggi.
 
-## Perbandingan baseline
+**Hasil Output:**
+```text
+Threshold terbaik berdasarkan validation F2-score:
+threshold            0.7
+precision_fraud      0.8041
+recall_fraud         0.7878
+f1_fraud             0.7959
+f2_fraud             0.7910
 
-Baseline: Logistic Regression dengan `class_weight="balanced"`.
+Evaluasi XGBoost dengan Threshold 0.7 pada Test Set:
+Confusion matrix:
+[[56837    27]
+ [   16    82]]
 
-| Model | Threshold | Precision fraud | Recall fraud | F1 fraud | PR-AUC |
-|---|---:|---:|---:|---:|---:|
-| Logistic Regression balanced | 0,5 | 0,0616 | 0,9184 | 0,1154 | 0,7209 |
-| XGBoost default | 0,5 | 0,6774 | 0,8571 | 0,7568 | 0,8541 |
-| XGBoost selected | 0,9 | 0,8333 | 0,8163 | 0,8247 | 0,8541 |
+              precision    recall  f1-score
+           1     0.7523    0.8367    0.7923
+```
 
-Logistic Regression memiliki recall lebih tinggi, tetapi false positive jauh
-lebih besar. XGBoost memberi keseimbangan yang lebih baik antara recall dan
-precision fraud.
+**Interpretasi untuk Demo:**
+Tuning mengubah *threshold* menjadi 0.7. Pada uji coba di data *Test*, *Recall* sedikit turun dari 84 menjadi 82 kasus yang tertangkap. Namun sebagai gantinya, salah tangkap (*False Positive*) berhasil ditekan dari 38 menjadi hanya 27. Dalam dunia perbankan, pemilihan *threshold* (apakah 0.5 atau 0.7) bergantung sepenuhnya pada limitasi kapasitas tim investigator kartu kredit.
 
-## Kesimpulan
+---
 
-XGBoost memberikan performa yang kuat untuk dataset fraud detection yang sangat
-imbalance. Threshold default 0,5 lebih cocok jika tujuan utama adalah menangkap
-lebih banyak fraud. Threshold 0,9 lebih cocok jika false positive harus ditekan
-tanpa menurunkan recall terlalu jauh.
+## 7. Feature Importance & Interpretability (Cell 35 - 39)
+**Penjelasan Cell:**
+Menampilkan fitur apa saja yang paling berperan penting bagi model XGBoost dalam mendeteksi *fraud*. *(Catatan: Pada iterasi run lingkungan lokal saat ini, modul SHAP dilewati karena benturan versi string dependensi)*.
 
-Pengembangan lanjutan yang disarankan:
+**Hasil Output:**
+```text
+Top 5 Feature Importance:
+14     V14    0.376476
+12     V12    0.074034
+10     V10    0.070451
+4       V4    0.057825
+20     V20    0.037342
+```
 
-- Tuning hyperparameter XGBoost dengan Stratified K-Fold.
-- Optimasi threshold berdasarkan biaya false negative dan false positive.
-- Eksperimen SMOTE hanya pada training data sebagai pembanding.
-- Monitoring data drift jika model dipakai dalam skenario production.
-- Interpretasi SHAP untuk analisis kontribusi fitur yang lebih detail.
+**Interpretasi untuk Demo:**
+Fitur `V14`, `V12`, dan `V10` paling dominan sebagai acuan XGBoost (menyumbang hampir 50% keputusan). Karena ini adalah hasil PCA yang dianonimkan untuk menjaga kerahasiaan nasabah bank, kita tidak dapat menafsirkan fitur aslinya. Akan tetapi, representasi ini penting untuk menunjukkan bahwa model *Machine Learning* bukanlah *Black Box* total, melainkan punya acuan matematis yang dapat dipertanggungjawabkan logikanya.
+
+---
+
+## 8. Baseline: Logistic Regression (Cell 40 - 43)
+**Penjelasan Cell:**
+Membandingkan model canggih XGBoost dengan model linier klasik, yaitu *Logistic Regression* bersistem klasifikasi berimbang (`class_weight="balanced"`).
+
+**Hasil Output:**
+```text
+                           model  threshold  precision_fraud  recall_fraud  f1_fraud    pr_auc  
+1      XGBoost default threshold        0.5         0.688525      0.857143  0.763636  0.848096  
+2     XGBoost selected threshold        0.7         0.752294      0.836735  0.792271  0.848096  
+0   Logistic Regression balanced        0.5         0.061560      0.918367  0.115385  0.720881  
+
+Confusion matrix Logistic Regression:
+[[55492  1372]
+ [    8    90]]
+```
+
+**Interpretasi untuk Demo:**
+*Logistic Regression* mendeteksi lebih banyak penipu (90 dari 98, *Recall* sangat tinggi). Namun model linier konvensional ini **menuduh 1.372 transaksi normal sebagai penipuan!** (`Precision` hancur menjadi ~6%). Jika dipakai di dunia nyata, divisi *Customer Service* bank akan kolaps akibat komplain pelanggan sah yang transaksinya ditolak. Itulah pembuktian mengapa kita wajib beralih menggunakan algoritma dengan arsitektur pohon berlapis yang menangkap interaksi *non-linear* seperti XGBoost karena nilai *PR-AUC* nya jauh lebih tinggi (0.84 berbanding 0.72).
+
+---
+
+## 9. Kesimpulan & Saran Pengembangan
+XGBoost dengan penyetelan `scale_pos_weight` telah berhasil memberikan performa luar biasa dalam mengatasi tantangan *Extreme Imbalanced Data*.
+- **Threshold Default (0.5)**: Ideal diaplikasikan jika institusi menetapkan langkah pencegahan agresif guna menangkap *fraud* semaksimal mungkin.
+- **Threshold Disetel (0.7)**: Sangat direkomendasikan bila institusi ingin efisiensi waktu karena dapat meredam alarm *False Positive* tanpa mengorbankan angka penangkapan secara masif.
+
+**Saran Inovasi Lanjutan:**
+1. Menerapkan skema evaluasi *Stratified K-Fold Cross Validation* guna memastikan model lebih matang dalam mempelajari variasi data penipuan.
+2. Sinkronisasi versi *library* agar proses analisis fitur eksplanatori mendalam (*SHAP values plot*) dapat berjalan lancar.
+3. Pengembangan matriks biaya operasional (*cost-sensitive tuning matrix*) agar *threshold* bisa langsung terhubung ke estimasi kerugian dalam nilai mata uang asli.

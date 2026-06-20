@@ -30,6 +30,7 @@ import seaborn as sns
 from IPython.display import display
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
+    auc,
     average_precision_score,
     classification_report,
     confusion_matrix,
@@ -38,6 +39,8 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     roc_auc_score,
+    roc_curve,
+    precision_recall_curve,
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
@@ -370,12 +373,12 @@ def plot_confusion_matrix(y_true, y_proba, threshold, title):
 # ## 6. Modeling dengan XGBoost
 #
 # Model utama menggunakan `XGBClassifier` dengan objective `binary:logistic`,
-# `eval_metric="aucpr"`, dan `scale_pos_weight` dari data training.
+# `eval_metric=["logloss", "aucpr"]`, dan `scale_pos_weight` dari data training.
 
 # %%
 xgb_model = XGBClassifier(
     objective="binary:logistic",
-    eval_metric="aucpr",
+    eval_metric=["logloss", "aucpr"],
     scale_pos_weight=scale_pos_weight,
     random_state=RANDOM_STATE,
     n_estimators=300,
@@ -388,11 +391,41 @@ xgb_model = XGBClassifier(
     tree_method="hist",
 )
 
-xgb_model.fit(X_train_scaled, y_train)
+eval_set = [(X_train_scaled, y_train), (X_val_scaled, y_val)]
+xgb_model.fit(X_train_scaled, y_train, eval_set=eval_set, verbose=False)
 
 xgb_val_proba = xgb_model.predict_proba(X_val_scaled)[:, 1]
 xgb_test_proba = xgb_model.predict_proba(X_test_scaled)[:, 1]
 
+# %%
+# Visualisasi Learning Curve (Log Loss & PR-AUC)
+results = xgb_model.evals_result()
+epochs = len(results['validation_0']['logloss'])
+x_axis = range(0, epochs)
+
+fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+
+# Plot Log Loss
+ax[0].plot(x_axis, results['validation_0']['logloss'], label='Train')
+ax[0].plot(x_axis, results['validation_1']['logloss'], label='Validation')
+ax[0].legend()
+ax[0].set_ylabel('Log Loss')
+ax[0].set_xlabel('Epochs')
+ax[0].set_title('XGBoost Log Loss (Train vs Validation)')
+
+# Plot PR-AUC
+ax[1].plot(x_axis, results['validation_0']['aucpr'], label='Train')
+ax[1].plot(x_axis, results['validation_1']['aucpr'], label='Validation')
+ax[1].legend()
+ax[1].set_ylabel('PR-AUC')
+ax[1].set_xlabel('Epochs')
+ax[1].set_title('XGBoost PR-AUC (Train vs Validation)')
+
+plt.tight_layout()
+plt.savefig("learning_curve.png", dpi=300)
+plt.show()
+
+# %%
 xgb_default_metrics = evaluate_probability_model(
     "XGBoost default threshold",
     y_test,
@@ -457,6 +490,45 @@ plot_confusion_matrix(
 # false positive dan meningkatkan precision, tetapi bisa melewatkan lebih banyak
 # fraud. Pada kasus fraud detection, threshold operasional sebaiknya dipilih
 # berdasarkan kapasitas tim review dan toleransi risiko fraud yang lolos.
+
+# %% [markdown]
+# ## 7.5. Visualisasi Metrik Evaluasi (ROC Curve & Precision-Recall Curve)
+#
+# Visualisasi ROC Curve melihat trade-off antara True Positive Rate dan False Positive Rate, 
+# sementara Precision-Recall Curve sangat penting pada dataset imbalanced untuk melihat 
+# trade-off antara Precision dan Recall.
+
+# %%
+fpr, tpr, _ = roc_curve(y_test, xgb_test_proba)
+roc_auc = auc(fpr, tpr)
+
+precision_vals, recall_vals, _ = precision_recall_curve(y_test, xgb_test_proba)
+pr_auc = average_precision_score(y_test, xgb_test_proba)
+
+fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+
+# ROC Curve
+ax[0].plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.4f})')
+ax[0].plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+ax[0].set_xlim([0.0, 1.0])
+ax[0].set_ylim([0.0, 1.05])
+ax[0].set_xlabel('False Positive Rate')
+ax[0].set_ylabel('True Positive Rate')
+ax[0].set_title('Receiver Operating Characteristic (ROC) Curve')
+ax[0].legend(loc="lower right")
+
+# Precision-Recall Curve
+ax[1].plot(recall_vals, precision_vals, color='blue', lw=2, label=f'PR curve (AUC = {pr_auc:.4f})')
+ax[1].set_xlim([0.0, 1.0])
+ax[1].set_ylim([0.0, 1.05])
+ax[1].set_xlabel('Recall')
+ax[1].set_ylabel('Precision')
+ax[1].set_title('Precision-Recall Curve')
+ax[1].legend(loc="lower left")
+
+plt.tight_layout()
+plt.savefig("metrics_curves.png", dpi=300)
+plt.show()
 
 # %% [markdown]
 # ## 8. Feature importance XGBoost
